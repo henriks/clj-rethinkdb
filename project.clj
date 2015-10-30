@@ -15,6 +15,7 @@
                  [org.clojure/tools.logging "0.3.1"]
                  [rethinkdb-protobuf "2.1.0"]
                  [com.google.protobuf/protobuf-java "2.6.1"]
+                 [clj-tcp "0.4.9"]
                  [clj-time "0.10.0"]]
   :profiles {:dev {:resource-paths ["test-resources"]
                    :dependencies [[ch.qos.logback/logback-classic "1.1.3"]]}}
