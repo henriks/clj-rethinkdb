@@ -5,7 +5,8 @@
             [rethinkdb.query-builder :refer [parse-query]]
             [rethinkdb.types :as types]
             [rethinkdb.response :refer [parse-response]]
-            [rethinkdb.utils :refer [str->bytes int->bytes bytes->int pp-bytes]])
+            [rethinkdb.utils :refer [str->bytes int->bytes bytes->int pp-bytes]]
+            [clj-tcp.client :as tcp])
   (:import [java.io Closeable InputStream OutputStream DataInputStream]))
 
 (declare send-continue-query send-stop-query)
@@ -23,25 +24,26 @@
                 (Thread/sleep 250)
                 (lazy-seq (concat coll (send-continue-query conn token))))))
 
-(defn send-int [^OutputStream out i n]
-  (.write out (int->bytes i n) 0 n))
+(defn send-int [out i n]
+  (tcp/write! out (int->bytes i n)))
 
-(defn send-str [^OutputStream out s]
+(defn send-str [out s]
   (let [n (count s)]
-    (.write out (str->bytes s) 0 n)))
+    (tcp/write! out (str->bytes s))))
 
-(defn read-str [^DataInputStream in n]
+(defn read-str [in n]
   (let [resp (byte-array n)]
     (.readFully in resp 0 n)
     (String. resp)))
 
-(defn ^String read-init-response [^InputStream in]
-  (let [resp (byte-array 4096)]
-    (.read in resp 0 4096)
-    (clojure.string/replace (String. resp) #"\W*$" "")))
+(defn ^String read-init-response [ in]
+  (-> in
+   tcp/read!
+   String.
+   (clojure.string/replace  #"\W*$" "")))
 
 
-(defn read-response* [^InputStream in]
+(defn read-response* [ in]
   (let [recvd-token (byte-array 8)
         length (byte-array 4)]
     (.read in recvd-token 0 8)
@@ -68,16 +70,10 @@
                               (async/>! recv-chan resp))
                             (catch java.net.SocketException e
                               false))
-                      (recur)))
-        ;; Send loop
-        send-loop (async/go-loop []
-                    (when-let [query (async/<! send-chan)]
-                      (log/trace "Sending raw query %s")
-                      (write-query out query)
                       (recur)))]
     ;; Return as map to merge into connection
     {:pub pub
-     :loops [recv-loop send-loop]
+     :loops [recv-loop]
      :r-ch recv-chan
      :ch send-chan}))
 

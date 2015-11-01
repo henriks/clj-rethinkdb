@@ -72,24 +72,26 @@
            auth-key ""
            db nil}}]
   (try
-    (let [socket (tcp/client host port)]
+    (let [ {:keys [read-ch write-ch error-ch] :as channel}
+              (tcp/client host port {:reuse-client false})]
       ;; Initialise the connection
-      (send-version socket)
-      (send-auth-key socket auth-key)
-      (send-protocol socket)
-      (let [init-response (read-init-response in)]
+      (send-version channel)
+      (send-auth-key channel auth-key)
+      (send-protocol channel)
+      (let [init-response (read-init-response channel)]
         (if-not (= init-response "SUCCESS")
           (throw (ex-info init-response {:host host :port port :auth-key auth-key :db db}))))
       ;; Once initialised, create the connection record
       (connection
         (merge
-          {:socket socket
-           :out out
-           :in in
+          {:channel channel
+           :in read-ch
+           :out write-ch
+           :error error-ch
            :db db
            :waiting #{}
-           :token token}
-          (make-connection-loops client))))
+           :token token})))
+          ;(make-connection-loops client))))
     (catch Exception e
       (log/error e "Error connecting to RethinkDB database")
       (throw (ex-info "Error connecting to RethinkDB database" {:host host :port port :auth-key auth-key :db db} e)))))
