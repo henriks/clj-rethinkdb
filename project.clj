@@ -11,14 +11,21 @@
   :dependencies [[org.clojure/clojure "1.7.0"]
                  [org.clojure/clojurescript "1.7.48" :scope "provided"]
                  [org.clojure/core.async "0.1.346.0-17112a-alpha"]
-                 [org.clojure/data.json "0.2.6"]
+                 [cheshire "5.5.0"]
                  [org.clojure/tools.logging "0.3.1"]
                  [rethinkdb-protobuf "2.1.0"]
                  [com.google.protobuf/protobuf-java "2.6.1"]
                  [clj-tcp "0.4.9"]
                  [clj-time "0.10.0"]]
-  :profiles {:dev {:resource-paths ["test-resources"]
+  :profiles {
+            :default [:base :user :dev]
+              :dev {:resource-paths ["test-resources"]
                    :dependencies [[ch.qos.logback/logback-classic "1.1.3"]]}}
-  :jvm-opts ["-Xmx512m"]
+  :jvm-opts ["-Xmx512m"
+             "-Dcom.sun.management.jmxremote"
+             "-Dcom.sun.management.jmxremote.ssl=false"
+             "-Dcom.sun.management.jmxremote.authenticate=false"
+             "-Dcom.sun.management.jmxremote.port=43210"]
+
   :deploy-repositories [["releases" :clojars]
                         ["snapshots" :clojars]])

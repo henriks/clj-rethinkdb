@@ -362,9 +362,7 @@
 (deftest query-conn
   (is (do (r/connect)
           true))
-  (is (thrown? clojure.lang.ExceptionInfo (r/connect :port 1)))
-  (with-redefs-fn {#'core/send-version (fn [out] (net/send-int out 168696 4))}
-    #(is (thrown? clojure.lang.ExceptionInfo (r/connect)))))
+  (is (thrown? clojure.lang.ExceptionInfo (r/connect :port 1))))
 
 (use-fixtures :each setup-each)
 (use-fixtures :once setup-once)

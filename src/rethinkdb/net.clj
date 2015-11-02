@@ -1,13 +1,13 @@
 (ns rethinkdb.net
-  (:require [clojure.data.json :as json]
+  (:require [cheshire.core :as cheshire]
             [clojure.core.async :as async]
             [clojure.tools.logging :as log]
             [rethinkdb.query-builder :refer [parse-query]]
             [rethinkdb.types :as types]
             [rethinkdb.response :refer [parse-response]]
-            [rethinkdb.utils :refer [str->bytes int->bytes bytes->int pp-bytes]]
+            [rethinkdb.utils :refer [str->bytes int->bytes bytes->int pp-bytes sub-bytes]]
             [clj-tcp.client :as tcp])
-  (:import [java.io Closeable InputStream OutputStream DataInputStream]))
+  (:import [java.io Closeable]))
 
 (declare send-continue-query send-stop-query)
 
@@ -28,13 +28,7 @@
   (tcp/write! out (int->bytes i n)))
 
 (defn send-str [out s]
-  (let [n (count s)]
-    (tcp/write! out (str->bytes s))))
-
-(defn read-str [in n]
-  (let [resp (byte-array n)]
-    (.readFully in resp 0 n)
-    (String. resp)))
+    (tcp/write! out (str->bytes s)))
 
 (defn ^String read-init-response [ in]
   (-> in
@@ -42,60 +36,31 @@
    String.
    (clojure.string/replace  #"\W*$" "")))
 
+(defn read-response* [result]
+  (let [recvd-token (bytes->int (sub-bytes result 0 7) 8)
+        length (bytes->int (sub-bytes result 8 11) 4)
+        json   (String. (sub-bytes result 12 (+ length 12)))]
+      [recvd-token json]))
 
-(defn read-response* [ in]
-  (let [recvd-token (byte-array 8)
-        length (byte-array 4)]
-    (.read in recvd-token 0 8)
-    (.read in length 0 4)
-    (let [recvd-token (bytes->int recvd-token 8)
-          length (bytes->int length 4)
-          json (read-str in length)]
-      [recvd-token json])))
+(defn write-query [channel [token json]]
+  (send-int channel token 8)
+  (send-int channel (count json) 4)
+  (send-str channel json))
 
-(defn write-query [out [token json]]
-  (send-int out token 8)
-  (send-int out (count json) 4)
-  (send-str out json))
-
-(defn make-connection-loops [in out]
-  (let [recv-chan (async/chan)
-        send-chan (async/chan)
-        pub       (async/pub recv-chan first)
-        ;; Receive loop
-        recv-loop (async/go-loop []
-                    (when (try
-                            (let [resp (read-response* in)]
-                              (log/trace "Received raw response %s" resp)
-                              (async/>! recv-chan resp))
-                            (catch java.net.SocketException e
-                              false))
-                      (recur)))]
-    ;; Return as map to merge into connection
-    {:pub pub
-     :loops [recv-loop]
-     :r-ch recv-chan
-     :ch send-chan}))
-
-(defn close-connection-loops
-  [conn]
-  (let [{:keys [pub ch r-ch] [recv-loop send-loop] :loops} @conn]
-    (async/unsub-all pub)
-    ;; Close send channel and wait for loop to complete
-    (async/close! ch)
-    (async/<!! send-loop)
-    ;; Close recv channel
-    (async/close! r-ch)))
+(defn connection-errors [error-ch]
+  {:connection-errors
+    (async/go-loop []
+    (when-let [[e v] (async/<! error-ch)]
+      (log/error e "Network error occured: ")
+      (recur)))})
 
 (defn send-query* [conn token query]
-  (let [chan (async/chan)
-        {:keys [pub ch]} @conn]
-    (async/sub pub token chan)
-    (async/>!! ch [token query])
-    (let [[recvd-token json] (async/<!! chan)]
-      (assert (= recvd-token token) "Must not receive response with different token")
-      (async/unsub-all pub token)
-      (json/read-str json :key-fn keyword))))
+  (let [{:keys [channel]} @conn]
+    (write-query channel [token query])
+    (let [[recvd-token json]
+      (read-response* (tcp/read! channel))]
+    (assert (= recvd-token token) "Must not receive response with different token")
+    (cheshire/parse-string json true))))
 
 (defn send-query [conn token query]
   (let [{:keys [db]} @conn
@@ -103,7 +68,7 @@
                 ;; TODO: Could provide other global optargs too
                 (concat query [{:db [(types/tt->int :DB) [db]]}])
                 query)
-        json (json/write-str query)
+        json (cheshire/generate-string query)
         {type :t resp :r :as json-resp} (send-query* conn token json)
         resp (parse-response resp)]
     (condp get type

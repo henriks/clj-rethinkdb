@@ -1,10 +1,11 @@
 (ns rethinkdb.core
-  (:require [rethinkdb.net :refer [send-int send-str read-init-response send-stop-query make-connection-loops close-connection-loops]]
+  (:require [rethinkdb.net :refer [send-int send-str read-init-response send-stop-query
+                                   connection-errors]]
             [clojure.tools.logging :as log]
+            [clojure.core.async :as async]
             [clj-tcp.client :as tcp])
   (:import [clojure.lang IDeref]
-           [java.io Closeable DataInputStream DataOutputStream]
-           [java.net Socket]))
+           [java.io Closeable]))
 
 (defn send-version
   "Sends protocol version to RethinkDB when establishing connection.
@@ -35,13 +36,13 @@
   "Closes RethinkDB database connection, stops all running queries
   and waits for response before returning."
   [conn]
-  (let [{:keys [^Socket socket ^DataOutputStream out ^DataInputStream in waiting]} @conn]
+  (let [{:keys [channel waiting out in error]} @conn]
     (doseq [token waiting]
       (send-stop-query conn token))
-    (close-connection-loops conn)
-    (.close out)
-    (.close in)
-    (.close socket)
+     (tcp/close-all channel)
+     (async/close! out)
+     (async/close! in)
+     (async/close! error)
     :closed))
 
 (defrecord Connection [conn]
@@ -63,10 +64,9 @@
   is not explicitly set. Default values are used for any parameters
   not provided.
 
-  (connect :host \"dbserver1.local\")
-  "
+  (connect :host \"dbserver1.local\")"
   [& {:keys [^String host ^int port token auth-key db]
-      :or {host "127.0.0.1"
+      :or {host "172.17.0.10"
            port 28015
            token 0
            auth-key ""
@@ -90,8 +90,8 @@
            :error error-ch
            :db db
            :waiting #{}
-           :token token})))
-          ;(make-connection-loops client))))
+           :token token}
+        (connection-errors error-ch))))
     (catch Exception e
       (log/error e "Error connecting to RethinkDB database")
       (throw (ex-info "Error connecting to RethinkDB database" {:host host :port port :auth-key auth-key :db db} e)))))

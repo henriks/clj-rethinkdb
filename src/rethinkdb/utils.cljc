@@ -19,6 +19,11 @@
             (doto buf
               (.put (.getBytes s)))
             (.array buf))))
+#?(:clj (defn sub-bytes [bs start end]
+    (-> bs
+    vec
+    (subvec start end)
+    byte-array)))
 
 #?(:clj (defn bytes->int
           "Converts bytes to int"
