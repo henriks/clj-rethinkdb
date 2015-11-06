@@ -1,6 +1,8 @@
 (ns rethinkdb.utils
   (:require [clojure.string :as string])
-  #?(:clj (:import [java.nio ByteOrder ByteBuffer])))
+  #?(:clj (:import [java.nio ByteOrder ByteBuffer]
+                   [io.netty.buffer ByteBuf]
+                   [java.nio.charset Charset])))
 
 #?(:clj (defn int->bytes
           "Creates a ByteBuffer of size n bytes containing int i"
@@ -19,6 +21,12 @@
             (doto buf
               (.put (.getBytes s)))
             (.array buf))))
+
+#?(:clj (defn buff->bytes [^ByteBuf buff start end]
+        (let [arr (byte-array (- end start))]
+        (.readBytes buff arr start end)
+        arr)))
+
 #?(:clj (defn sub-bytes [bs start end]
     (-> bs
     vec

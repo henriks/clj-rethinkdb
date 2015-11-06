@@ -1,10 +1,14 @@
 (ns rethinkdb.core
   (:require [rethinkdb.net :refer [send-int send-str read-init-response send-stop-query
-                                   connection-errors]]
+                                   make-connection-loops read-response]]
             [clojure.tools.logging :as log]
             [clojure.core.async :as async]
-            [clj-tcp.client :as tcp])
+            [clj-tcp.client :as tcp]
+            [rethinkdb.utils :as utils]
+            [clj-tcp.codec :as tcp-utils])
   (:import [clojure.lang IDeref]
+           [io.netty.channel ChannelOption]
+           [io.netty.buffer ByteBuf]
            [java.io Closeable]))
 
 (defn send-version
@@ -15,7 +19,7 @@
         v2 1915781601
         v3 1601562686
         v4 1074539808]
-    (send-int out v3 4)))
+    (send-int out v4 4)))
 
 (defn send-protocol
   "Sends protocol type to RethinkDB when establishing connection.
@@ -66,19 +70,23 @@
 
   (connect :host \"dbserver1.local\")"
   [& {:keys [^String host ^int port token auth-key db]
-      :or {host "172.17.0.10"
+      :or {host "172.17.0.1"
            port 28015
            token 0
            auth-key ""
            db nil}}]
   (try
-    (let [ {:keys [read-ch write-ch error-ch] :as channel}
-              (tcp/client host port {:reuse-client false})]
+    (let [ init-ch (async/timeout 5000)
+          {:keys [read-ch write-ch error-ch] :as channel}
+              (tcp/client host port {:reuse-client false
+                                     :channel-options [[ChannelOption/TCP_NODELAY true][ChannelOption/SO_RCVBUF (int 5242880)]]
+                                     :decoder (defn copy-bytebuf [read-ch ^ByteBuf buff]
+                                                (read-response (.copy buff) read-ch init-ch))})]
       ;; Initialise the connection
       (send-version channel)
       (send-auth-key channel auth-key)
       (send-protocol channel)
-      (let [init-response (read-init-response channel)]
+      (let [init-response (async/<!! init-ch)]
         (if-not (= init-response "SUCCESS")
           (throw (ex-info init-response {:host host :port port :auth-key auth-key :db db}))))
       ;; Once initialised, create the connection record
@@ -91,7 +99,7 @@
            :db db
            :waiting #{}
            :token token}
-        (connection-errors error-ch))))
+        (make-connection-loops channel))))
     (catch Exception e
       (log/error e "Error connecting to RethinkDB database")
       (throw (ex-info "Error connecting to RethinkDB database" {:host host :port port :auth-key auth-key :db db} e)))))

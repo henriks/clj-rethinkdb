@@ -16,6 +16,7 @@
                  [rethinkdb-protobuf "2.1.0"]
                  [com.google.protobuf/protobuf-java "2.6.1"]
                  [clj-tcp "0.4.9"]
+                 [gloss "0.2.5"]
                  [clj-time "0.10.0"]]
   :profiles {
             :default [:base :user :dev]

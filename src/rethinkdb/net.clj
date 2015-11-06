@@ -2,13 +2,39 @@
   (:require [cheshire.core :as cheshire]
             [clojure.core.async :as async]
             [clojure.tools.logging :as log]
+            [manifold.deferred :as d]
+            [manifold.stream :as s]
             [rethinkdb.query-builder :refer [parse-query]]
             [rethinkdb.types :as types]
+            [byte-streams :as stream]
             [rethinkdb.response :refer [parse-response]]
-            [rethinkdb.utils :refer [str->bytes int->bytes bytes->int pp-bytes sub-bytes]]
-            [clj-tcp.client :as tcp])
-  (:import [java.io Closeable]))
+            [rethinkdb.utils :refer [buff->bytes str->bytes
+                                      int->bytes bytes->int
+                                      pp-bytes sub-bytes]]
+            [clj-tcp.client :as tcp]
+    [gloss.core :as gloss]
+    [gloss.io :as io])
 
+  (:import [java.io Closeable]
+           [io.netty.buffer Unpooled UnpooledByteBufAllocator ByteBufAllocator]
+           [io.netty.buffer ByteBuf]))
+
+(def protocol (gloss/compile-frame
+                  (gloss/finite-block  :uint64-le)
+                  (gloss/finite-frame (gloss/prefix :int32-le) (gloss/string :utf-8)) pr-str))
+
+(defn wrap-duplex-stream
+  [protocol s]
+  (let [out (s/stream)]
+    (s/connect
+      (s/map #(io/encode protocol %) out)
+      s)
+
+    (s/splice
+      out
+      (io/decode-stream s protocol))))
+
+(def ^ByteBufAllocator allocator UnpooledByteBufAllocator/DEFAULT)
 (declare send-continue-query send-stop-query)
 
 (defn close
@@ -30,36 +56,58 @@
 (defn send-str [out s]
     (tcp/write! out (str->bytes s)))
 
-(defn ^String read-init-response [ in]
-  (-> in
-   tcp/read!
+(defn read-init-response [^ByteBuf buff init-ch]
+  (-> buff
+   (buff->bytes 0 8)
    String.
-   (clojure.string/replace  #"\W*$" "")))
+   (clojure.string/replace  #"\W*$" "")
+   (->> (async/>!! init-ch))))
 
-(defn read-response* [result]
-  (let [recvd-token (bytes->int (sub-bytes result 0 7) 8)
-        length (bytes->int (sub-bytes result 8 11) 4)
-        json   (String. (sub-bytes result 12 (+ length 12)))]
-      [recvd-token json]))
+(defn read-query-response [^ByteBuf buff read-ch]
+  (let [
+        bytes-arr   (buff->bytes buff 0 (.readableBytes buff))
+        recvd-token (bytes->int (sub-bytes bytes-arr 0 7) 8)
+        length (bytes->int (sub-bytes bytes-arr 8 11) 4)]
+       (when (<= length (count bytes-arr))
+        (async/>!! read-ch [recvd-token
+          (String. (sub-bytes bytes-arr 12 (+ length 12)))]))))
+
+(defn read-response [^ByteBuf buff read-ch init-ch]
+(if (= 8 (.readableBytes buff))
+    (read-init-response buff init-ch)
+    (async/>!! read-ch buff)))
 
 (defn write-query [channel [token json]]
-  (send-int channel token 8)
-  (send-int channel (count json) 4)
-  (send-str channel json))
+  (tcp/write! channel
+  (byte-array (concat
+    (int->bytes token 8)
+    (int->bytes (count json) 4)
+    (str->bytes json)))))
 
-(defn connection-errors [error-ch]
-  {:connection-errors
-    (async/go-loop []
-    (when-let [[e v] (async/<! error-ch)]
-      (log/error e "Network error occured: ")
-      (recur)))})
+(defn make-connection-loops [{:keys [read-ch error-ch] :as channel}]
+ (let [parsed-in (async/chan (async/sliding-buffer 100))
+       ;pub (async/pub read-ch first)
+        connection-errors
+        (async/go-loop []
+        (when-let [[e v] (async/<! error-ch)]
+          (log/error e "Network error occured: ")
+          (recur)))]
+  {:loops [connection-errors]
+   :parsed-in parsed-in
+   ;:pub pub
+}))
 
 (defn send-query* [conn token query]
-  (let [{:keys [channel]} @conn]
+  (let [{:keys [channel pub parsed-in]} @conn
+        chan (async/timeout 5000)]
+    ;(async/sub pub token chan)
     (write-query channel [token query])
+    (>break!)
     (let [[recvd-token json]
-      (read-response* (tcp/read! channel))]
+          (async/<!! chan)]
     (assert (= recvd-token token) "Must not receive response with different token")
+    (println (str "token is " token))
+    (async/unsub pub token chan)
     (cheshire/parse-string json true))))
 
 (defn send-query [conn token query]
