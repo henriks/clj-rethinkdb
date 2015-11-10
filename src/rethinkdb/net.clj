@@ -2,39 +2,44 @@
   (:require [cheshire.core :as cheshire]
             [clojure.core.async :as async]
             [clojure.tools.logging :as log]
-            [manifold.deferred :as d]
             [manifold.stream :as s]
+            [manifold.bus :as bus]
             [rethinkdb.query-builder :refer [parse-query]]
             [rethinkdb.types :as types]
-            [byte-streams :as stream]
             [rethinkdb.response :refer [parse-response]]
             [rethinkdb.utils :refer [buff->bytes str->bytes
                                       int->bytes bytes->int
                                       pp-bytes sub-bytes]]
-            [clj-tcp.client :as tcp]
-    [gloss.core :as gloss]
-    [gloss.io :as io])
-
+            [gloss.core :as gloss]
+            [gloss.io :as io])
   (:import [java.io Closeable]
            [io.netty.buffer Unpooled UnpooledByteBufAllocator ByteBufAllocator]
            [io.netty.buffer ByteBuf]))
 
-(def protocol (gloss/compile-frame
-                  (gloss/finite-block  :uint64-le)
-                  (gloss/finite-frame (gloss/prefix :int32-le) (gloss/string :utf-8)) pr-str))
+(gloss/defcodec query-frame (gloss/compile-frame
+                               (gloss/finite-frame
+                              (gloss/prefix :int32-le)
+                              (gloss/string :utf-8))
+            cheshire/generate-string
+            #(cheshire/parse-string % true)))
+
+(gloss/defcodec id :int64-le)
+(gloss/defcodec msg-protocol [id query-frame])
+
+;(gloss/defcodec init-response
+;    (gloss/string :utf-8 :delimiters utils/null-term))
 
 (defn wrap-duplex-stream
-  [protocol s]
+  [s]
   (let [out (s/stream)]
     (s/connect
-      (s/map #(io/encode protocol %) out)
+      (s/map #(io/encode msg-protocol %) out)
       s)
 
     (s/splice
       out
-      (io/decode-stream s protocol))))
+      (io/decode-stream s msg-protocol))))
 
-(def ^ByteBufAllocator allocator UnpooledByteBufAllocator/DEFAULT)
 (declare send-continue-query send-stop-query)
 
 (defn close
@@ -50,65 +55,45 @@
                 (Thread/sleep 250)
                 (lazy-seq (concat coll (send-continue-query conn token))))))
 
-(defn send-int [out i n]
-  (tcp/write! out (int->bytes i n)))
-
-(defn send-str [out s]
-    (tcp/write! out (str->bytes s)))
-
-(defn read-init-response [^ByteBuf buff init-ch]
-  (-> buff
-   (buff->bytes 0 8)
+(defn read-init-response [resp]
+  (-> resp
    String.
-   (clojure.string/replace  #"\W*$" "")
-   (->> (async/>!! init-ch))))
+   (clojure.string/replace  #"\W*$" "")))
 
-(defn read-query-response [^ByteBuf buff read-ch]
-  (let [
-        bytes-arr   (buff->bytes buff 0 (.readableBytes buff))
-        recvd-token (bytes->int (sub-bytes bytes-arr 0 7) 8)
-        length (bytes->int (sub-bytes bytes-arr 8 11) 4)]
-       (when (<= length (count bytes-arr))
-        (async/>!! read-ch [recvd-token
-          (String. (sub-bytes bytes-arr 12 (+ length 12)))]))))
+(defn handshake [version auth proto client]
+  (let [auth-bytes (if (some? auth)
+            (str->bytes auth)
+            (int->bytes 0 4))
+         msg-bytes (byte-array (concat
+            (int->bytes version 4)
+            auth-bytes
+            (int->bytes proto 4)))]
+  @(s/put! client msg-bytes)
+  (read-init-response @(s/take! client))))
 
-(defn read-response [^ByteBuf buff read-ch init-ch]
-(if (= 8 (.readableBytes buff))
-    (read-init-response buff init-ch)
-    (async/>!! read-ch buff)))
-
-(defn write-query [channel [token json]]
-  (tcp/write! channel
-  (byte-array (concat
-    (int->bytes token 8)
-    (int->bytes (count json) 4)
-    (str->bytes json)))))
-
-(defn make-connection-loops [{:keys [read-ch error-ch] :as channel}]
+(defn make-connection-loops [client]
  (let [parsed-in (async/chan (async/sliding-buffer 100))
-       ;pub (async/pub read-ch first)
-        connection-errors
+       pub (async/pub parsed-in first)
+        publish-loop
         (async/go-loop []
-        (when-let [[e v] (async/<! error-ch)]
-          (log/error e "Network error occured: ")
+        (when-let [result @(s/take! @client)]
+          (async/>! parsed-in result)
           (recur)))]
-  {:loops [connection-errors]
+  {:loops [publish-loop]
    :parsed-in parsed-in
-   ;:pub pub
-}))
+   :pub pub}))
 
-(defn send-query* [conn token query]
-  (let [{:keys [channel pub parsed-in]} @conn
-        chan (async/timeout 5000)]
-    ;(async/sub pub token chan)
-    (write-query channel [token query])
-    (>break!)
+(defn send-query* [{:keys [client pub] :as conn}
+                    token query]
+  (let [chan (async/chan)]
+    (async/sub pub token chan)
+    (s/put! @client [token query])
     (let [[recvd-token json]
           (async/<!! chan)]
-    (assert (= recvd-token token) "Must not receive response with different token")
-    (println (str "token is " token))
+    (assert (= recvd-token token)
+      "Must not receive response with different token")
     (async/unsub pub token chan)
-    (cheshire/parse-string json true))))
+    json)))
 
 (defn send-query [conn token query]
   (let [{:keys [db]} @conn
@@ -116,8 +101,8 @@
                 ;; TODO: Could provide other global optargs too
                 (concat query [{:db [(types/tt->int :DB) [db]]}])
                 query)
-        json (cheshire/generate-string query)
-        {type :t resp :r :as json-resp} (send-query* conn token json)
+        json query
+        {type :t resp :r :as json-resp} (send-query* @conn token json)
         resp (parse-response resp)]
     (condp get type
       #{1} (first resp) ;; Success Atom, Query returned a single RQL datatype

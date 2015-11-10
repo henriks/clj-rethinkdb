@@ -15,6 +15,7 @@
                  [org.clojure/tools.logging "0.3.1"]
                  [rethinkdb-protobuf "2.1.0"]
                  [com.google.protobuf/protobuf-java "2.6.1"]
+                 [aleph "0.4.1-beta2"]
                  [clj-tcp "0.4.9"]
                  [gloss "0.2.5"]
                  [clj-time "0.10.0"]]

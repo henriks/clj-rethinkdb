@@ -13,6 +13,8 @@
               (.putInt i))
             (.array buf))))
 
+#?(:clj (def null-term "\0"))
+
 #?(:clj (defn str->bytes
           "Creates a ByteBuffer of size n bytes containing string s converted to bytes"
           [^String s]
