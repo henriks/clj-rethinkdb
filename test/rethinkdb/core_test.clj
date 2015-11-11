@@ -142,27 +142,31 @@
 
 (deftest changefeeds
   (with-open [conn (r/connect)]
-    (let [changes (future
-                    (-> (r/db test-db)
+    (let [cursor (-> (r/db test-db)
                         (r/table test-table)
                         r/changes
-                        (r/run conn)))]
-      (Thread/sleep 500)
-      (r/run (-> (r/db test-db)
+                        (r/run conn))
+        changes (future
+                    (first cursor))]
+      (-> (r/db test-db)
                  (r/table test-table)
-                 (r/insert (take 2 (repeat {:name "Test"})))) conn)
-      (is (= "Test" ((comp :name :new_val) (first @changes))))))
+                 (r/insert (take 2 (repeat {:name "Test"})))
+                 (r/run conn))
+      (Thread/sleep 500)
+      (is (= "Test" ((comp :name :new_val) @changes)))
+      (net/close cursor)))
   (with-open [conn (r/connect :db test-db)]
-    (let [changes (future
-                    (-> (r/db test-db)
+    (let [cursor (-> (r/db test-db)
                         (r/table test-table)
                         r/changes
-                        (r/run conn)))]
+                        (r/run conn))
+          changes (future (first cursor))]
+      (-> (r/table test-table)
+                 (r/insert (take 2 (repeat {:name "Test"})))
+                 (r/run conn))
       (Thread/sleep 500)
-      (r/run (-> (r/table test-table)
-                 (r/insert (take 2 (repeat {:name "Test"}))))
-             conn)
-      (is (= "Test" ((comp :name :new_val) (first @changes)))))))
+      (is (= "Test" ((comp :name :new_val) @changes)))
+      (net/close cursor))))
 
 (deftest document-manipulation
   (with-open [conn (r/connect :db test-db)]

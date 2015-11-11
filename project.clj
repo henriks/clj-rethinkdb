@@ -1,4 +1,4 @@
-(defproject com.apa512/rethinkdb "0.11.0"
+(defproject com.apa512/rethinkdb "0.11.1"
   :description "RethinkDB client"
   :url "http://github.com/apa512/clj-rethinkdb"
   :license {:name "Eclipse Public License"
@@ -16,18 +16,10 @@
                  [rethinkdb-protobuf "2.1.0"]
                  [com.google.protobuf/protobuf-java "2.6.1"]
                  [aleph "0.4.1-beta2"]
-                 [clj-tcp "0.4.9"]
                  [gloss "0.2.5"]
                  [clj-time "0.10.0"]]
-  :profiles {
-            :default [:base :user :dev]
-              :dev {:resource-paths ["test-resources"]
+  :profiles {:dev {:resource-paths ["test-resources"]
                    :dependencies [[ch.qos.logback/logback-classic "1.1.3"]]}}
-  :jvm-opts ["-Xmx512m"
-             "-Dcom.sun.management.jmxremote"
-             "-Dcom.sun.management.jmxremote.ssl=false"
-             "-Dcom.sun.management.jmxremote.authenticate=false"
-             "-Dcom.sun.management.jmxremote.port=43210"]
-
+  :jvm-opts ["-Xmx512m"]
   :deploy-repositories [["releases" :clojars]
                         ["snapshots" :clojars]])

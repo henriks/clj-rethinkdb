@@ -33,11 +33,10 @@
 ;; Uncomment to run test
 (deftest connection-speed-test-single
   (println "performance (connection per query)")
-  (with-open [conn r/connect]
     (time
       (doseq [n (range 100)]
         (with-open [conn (r/connect)]
-          (r/run query conn))))))
+          (r/run query conn)))))
 
 (deftest connection-speed-test-reuse
   (println "performance (reusing connection")

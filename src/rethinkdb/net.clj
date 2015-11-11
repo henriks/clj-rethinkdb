@@ -12,9 +12,7 @@
                                       pp-bytes sub-bytes]]
             [gloss.core :as gloss]
             [gloss.io :as io])
-  (:import [java.io Closeable]
-           [io.netty.buffer Unpooled UnpooledByteBufAllocator ByteBufAllocator]
-           [io.netty.buffer ByteBuf]))
+  (:import [java.io Closeable]))
 
 (gloss/defcodec query-frame (gloss/compile-frame
                                (gloss/finite-frame
@@ -25,9 +23,6 @@
 
 (gloss/defcodec id :int64-le)
 (gloss/defcodec msg-protocol [id query-frame])
-
-;(gloss/defcodec init-response
-;    (gloss/string :utf-8 :delimiters utils/null-term))
 
 (defn wrap-duplex-stream
   [s]
@@ -53,7 +48,8 @@
   clojure.lang.Seqable
   (seq [this] (do
                 (Thread/sleep 250)
-                (lazy-seq (concat coll (send-continue-query conn token))))))
+                (lazy-seq (concat coll
+                  (send-continue-query conn token))))))
 
 (defn read-init-response [resp]
   (-> resp
@@ -97,11 +93,10 @@
 
 (defn send-query [conn token query]
   (let [{:keys [db]} @conn
-        query (if (and db (= 2 (count query))) ;; If there's only 1 element in query then this is a continue or stop query.
+        json (if (and db (= 2 (count query))) ;; If there's only 1 element in query then this is a continue or stop query.
                 ;; TODO: Could provide other global optargs too
                 (concat query [{:db [(types/tt->int :DB) [db]]}])
                 query)
-        json query
         {type :t resp :r :as json-resp} (send-query* @conn token json)
         resp (parse-response resp)]
     (condp get type

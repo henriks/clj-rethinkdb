@@ -5,11 +5,8 @@
             [manifold.deferred :as d]
             [manifold.stream :as s]
             [aleph.tcp :as tcp]
-            [clojure.core.async :as async]
-            [rethinkdb.utils :as utils])
+            [clojure.core.async :as async])
   (:import [clojure.lang IDeref]
-           [io.netty.channel ChannelOption]
-           [io.netty.buffer ByteBuf]
            [java.io Closeable]))
 
 (def versions
@@ -26,13 +23,11 @@
   "Closes RethinkDB database connection, stops all running queries
   and waits for response before returning."
   [conn]
-  (let [{:keys [channel waiting out in error]} @conn]
+  (let [{:keys [client waiting parsed-in]} @conn]
     (doseq [token waiting]
       (send-stop-query conn token))
-     (s/close! channel)
-     (async/close! out)
-     (async/close! in)
-     (async/close! error)
+     (s/close! @client)
+     (async/close! parsed-in)
     :closed))
 
 (defrecord Connection [conn]
@@ -61,10 +56,10 @@
 
   (connect :host \"dbserver1.local\")"
   [& {:keys [^String host ^int port token auth-key db version protocol]
-      :or {host "172.17.0.1"
+      :or {host "127.0.0.1"
            port 28015
            token 0
-           version :v4
+           version :v3
            protocol :json
            db nil}}]
   (try
