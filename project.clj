@@ -1,4 +1,4 @@
-(defproject com.apa512/rethinkdb "0.11.1"
+(defproject com.apa512/rethinkdb "0.11.0"
   :description "RethinkDB client"
   :url "http://github.com/apa512/clj-rethinkdb"
   :license {:name "Eclipse Public License"
@@ -14,6 +14,7 @@
                  [cheshire "5.5.0"]
                  [org.clojure/tools.logging "0.3.1"]
                  [rethinkdb-protobuf "2.1.0"]
+                 [manifold "0.1.1"]
                  [com.google.protobuf/protobuf-java "2.6.1"]
                  [aleph "0.4.1-beta2"]
                  [gloss "0.2.5"]

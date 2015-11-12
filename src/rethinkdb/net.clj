@@ -3,13 +3,12 @@
             [clojure.core.async :as async]
             [clojure.tools.logging :as log]
             [manifold.stream :as s]
-            [manifold.bus :as bus]
             [rethinkdb.query-builder :refer [parse-query]]
             [rethinkdb.types :as types]
             [rethinkdb.response :refer [parse-response]]
-            [rethinkdb.utils :refer [buff->bytes str->bytes
+            [rethinkdb.utils :refer [str->bytes
                                       int->bytes bytes->int
-                                      pp-bytes sub-bytes]]
+                                      pp-bytes]]
             [gloss.core :as gloss]
             [gloss.io :as io])
   (:import [java.io Closeable]))
