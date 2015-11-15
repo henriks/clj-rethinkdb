@@ -1,6 +1,6 @@
 (ns rethinkdb.net
   (:require [cheshire.core :as cheshire]
-            [clojure.tools.logging :as log]
+            [taoensso.timbre :as timbre]
             [manifold.stream :as s]
             [manifold.bus :as bus]
             [manifold.deferred :as d]
@@ -62,23 +62,23 @@
   (let [client (:client @conn)]
     (s/consume
       (fn [data]
-        (log/trace "routing" data)
+        (timbre/trace "routing" data)
         (let [[recvd-token json-resp] data]
           (let [{sinks :sinks} @conn]
             (if-let [sink (get sinks recvd-token)]
               (s/put! sink json-resp)
-              (log/warn "UNKNOWN TOKEN" recvd-token json-resp)))))
+              (timbre/warn "UNKNOWN TOKEN" recvd-token json-resp)))))
       client)))
 
 (defn send-data [client token query]
-  (log/trace "sending" token query)
+  (timbre/trace "sending" token query)
   (s/put! client [token query]))
 
 (defn token-stream [token client db]
   {:pre  [(integer? token) (s/stream? client)]
    :post [(s/source? %)]}
 
-  (log/debug "token" token)
+  (timbre/debug "token" token)
 
   (let [db-part {:db [(types/tt->int :DB) [db]]}
         continue-query (concat (parse-query :CONTINUE) db-part)
@@ -90,28 +90,28 @@
         output (s/stream)
 
         cleanup (fn [_]
-                  (log/debug "closing input")
+                  (timbre/debug "closing input")
                   (d/chain
                     (s/close! input)
-                    (fn [_] (log/debug "closed?" (s/closed? input) input))))
+                    (fn [_] (timbre/debug "closed?" (s/closed? input) input))))
 
         complete-atom (fn [response]                        ; submit data, close streams
-                        (log/debug "complete-atom" response)
+                        (timbre/debug "complete-atom" response)
                         (reset! waiting false)
-                        (log/debug "waiting is" @waiting)
+                        (timbre/debug "waiting is" @waiting)
                         (d/chain
                           (s/put! output (first response))
                           cleanup))
 
         complete-sequence (fn [response]                    ; submit data, close streams
-                            (log/debug "complete-sequence" response)
+                            (timbre/debug "complete-sequence" response)
                             (reset! waiting false)
                             (d/chain
                               (s/put! output response)
                               cleanup))
 
         partial-sequence (fn [response]                     ; submit data, send continue
-                           (log/debug "partial-sequence" response)
+                           (timbre/debug "partial-sequence" response)
                            (reset! waiting true)
                            (d/chain
                              (s/put! output response)
@@ -121,26 +121,26 @@
       waiting
       :watcher
       (fn [& args]
-        (log/debug "state change" args)))
+        (timbre/debug "state change" args)))
 
     (s/on-closed
       input
       #(do
-        (log/debug "close callback" @waiting)
+        (timbre/debug "close callback" @waiting)
 
         (when @waiting (send-data client token stop-query))))
 
     (s/connect-via
       input
       (fn [{type :t resp :r :as json-resp}]
-        (log/debug "got" json-resp)
+        (timbre/debug "got" json-resp)
         (d/chain
           (let [resp (parse-response resp)]
             (condp get type
               #{1} (complete-atom resp)
               #{2} (complete-sequence resp)
               #{3} (partial-sequence resp)
-              (log/log :warn "unhandled response" resp)))
+              (timbre/log :warn "unhandled response" resp)))
           (fn [_] (d/success-deferred true))))
       output)
 
@@ -154,7 +154,7 @@
     (let [bind (fn [stream]
                  (swap! (:conn conn) (fn [m] (assoc-in m [:sinks token] stream))))
           unbind (fn []
-                   (log/debug "removing sink for token " token)
+                   (timbre/debug "removing sink for token " token)
                    (swap! (:conn conn) (fn [m]
                                          (update-in m [:sinks]
                                                     (fn [sinks]
@@ -170,5 +170,5 @@
           stream)))))
 
 (defn send-start-query [conn token query]
-  (log/debugf "Sending start query with token %d, query: %s" token query)
+  (timbre/debugf "Sending start query with token %d, query: %s" token query)
   (send-query conn token (parse-query :START query)))

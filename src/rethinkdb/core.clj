@@ -1,7 +1,7 @@
 (ns rethinkdb.core
   (:require [rethinkdb.net :refer [read-init-response send-stop-query setup-routing
                                    wrap-duplex-stream handshake]]
-            [clojure.tools.logging :as log]
+            [taoensso.timbre :as timbre]
             [manifold.deferred :as d]
             [manifold.stream :as s]
             [aleph.tcp :as tcp])
@@ -25,7 +25,7 @@
   (let [{:keys [client sinks]} @conn]
     (s/close! client)
     (doseq [[token sink] sinks]
-      (log/debug "closing token" token)
+      (timbre/debug "closing token" token)
       (.close sink))
     :closed))
 
@@ -72,5 +72,5 @@
         (setup-routing connection)
         connection))
     (catch Exception e
-      (log/error e "Error connecting to RethinkDB database")
+      (timbre/error e "Error connecting to RethinkDB database")
       (throw (ex-info "Error connecting to RethinkDB database" {:host host :port port :auth-key auth-key :db db} e)))))
