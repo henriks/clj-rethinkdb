@@ -107,7 +107,7 @@
                             (timbre/debug "complete-sequence" response)
                             (reset! waiting false)
                             (d/chain
-                              (s/put! output response)
+                              (s/put-all! output response)
                               cleanup))
 
         partial-sequence (fn [response]                     ; submit data, send continue
@@ -127,7 +127,6 @@
       input
       #(do
         (timbre/debug "close callback" @waiting)
-
         (when @waiting (send-data client token stop-query))))
 
     (s/connect-via
@@ -144,11 +143,11 @@
           (fn [_] (d/success-deferred true))))
       output)
 
-    (s/splice input (s/throttle 4 output))))
+    (s/splice input output)))
 
 (defn send-query [conn token query]
   {:pre  [(integer? token) (s/stream? (:client @conn))]
-   :post [(d/deferred? %)]}
+   :post [(s/stream? %)]}
 
   (let [{:keys [client db]} @conn]
     (let [bind (fn [stream]
@@ -167,7 +166,10 @@
       (d/chain
         (send-data client token query)
         (fn [success]
-          stream)))))
+          (when-not success
+            (s/close! stream))))
+
+      stream)))
 
 (defn send-start-query [conn token query]
   (timbre/debugf "Sending start query with token %d, query: %s" token query)
