@@ -6,7 +6,8 @@
             [manifold.stream :as s]
             [aleph.tcp :as tcp])
   (:import [clojure.lang IDeref]
-           [java.io Closeable]))
+           [java.io Closeable]
+           (io.netty.channel ChannelOption)))
 
 (def versions
   {:v1 1063369270
@@ -57,7 +58,8 @@
              protocol :json
              db       nil}}]
   (try
-    (let [client @(tcp/client {:host host :port port})
+    (let [disable-tcp-delay (fn [bootstrap] (doto bootstrap (.option ChannelOption/TCP_NODELAY true)))
+          client @(tcp/client {:host host :port port :bootstrap-transform disable-tcp-delay})
           init-response (handshake (version versions) auth-key (protocol protocols) client)]
       (if-not (= init-response "SUCCESS")
         (throw (ex-info init-response {:host host :port port :auth-key auth-key :db db})))
