@@ -115,7 +115,12 @@
                            (reset! waiting true)
                            (d/chain
                              (s/put! output response)
-                             (fn [_] (send-data client token continue-query))))]
+                             (fn [_] (send-data client token continue-query))))
+
+        handle-unexpected (fn [type response]
+                            (timbre/log :warn "unhandled response: " response ", type: " type)
+                            (reset! waiting false)
+                            (cleanup))]
 
     (add-watch
       waiting
@@ -139,7 +144,7 @@
               #{1} (complete-atom resp)
               #{2} (complete-sequence resp)
               #{3} (partial-sequence resp)
-              (timbre/log :warn "unhandled response" resp)))
+              (handle-unexpected type resp)))
           (fn [_] (d/success-deferred true))))
       output)
 
