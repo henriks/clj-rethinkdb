@@ -67,7 +67,10 @@
           (if (b/active? bus recvd-token)
             (b/publish! bus recvd-token json-resp)
             (timbre/warn "UNKNOWN TOKEN" recvd-token json-resp))))
-      client)))
+      client)
+
+    (s/on-drained client #(doseq [[_ subs] (b/topic->subscribers bus)]
+                           (doseq [sub subs] (s/close! sub))))))
 
 (defn send-data [client token query]
   (timbre/trace "sending" token query)
