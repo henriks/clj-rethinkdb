@@ -2,7 +2,7 @@
   (:require [cheshire.core :as cheshire]
             [taoensso.timbre :as timbre]
             [manifold.stream :as s]
-            [manifold.bus :as bus]
+            [manifold.bus :as b]
             [manifold.deferred :as d]
             [rethinkdb.query-builder :refer [parse-query]]
             [rethinkdb.types :as types]
@@ -58,23 +58,22 @@
     @(s/put! client msg-bytes)
     (read-init-response @(s/take! client))))
 
-(defn setup-routing [conn]
-  (let [client (:client @conn)]
+(defn setup-bus [conn]
+  (let [{client :client bus :bus} @conn]
     (s/consume
       (fn [data]
-        (timbre/trace "routing" data)
+        (timbre/trace "publishing" data)
         (let [[recvd-token json-resp] data]
-          (let [{sinks :sinks} @conn]
-            (if-let [sink (get sinks recvd-token)]
-              (s/put! sink json-resp)
-              (timbre/warn "UNKNOWN TOKEN" recvd-token json-resp)))))
+          (if (b/active? bus recvd-token)
+            (b/publish! bus recvd-token json-resp)
+            (timbre/warn "UNKNOWN TOKEN" recvd-token json-resp))))
       client)))
 
 (defn send-data [client token query]
   (timbre/trace "sending" token query)
   (s/put! client [token query]))
 
-(defn token-stream [token client db]
+(defn token-stream [input token client db]
   {:pre  [(integer? token) (s/stream? client)]
    :post [(s/source? %)]}
 
@@ -86,7 +85,6 @@
 
         waiting (atom true)
 
-        input (s/buffered-stream 10)
         output (s/stream)
 
         cleanup (fn [_]
@@ -128,7 +126,7 @@
       (fn [& args]
         (timbre/debug "state change" args)))
 
-    (s/on-closed
+    (s/on-drained
       input
       #(do
         (timbre/debug "close callback" @waiting)
@@ -148,25 +146,14 @@
           (fn [_] (d/success-deferred true))))
       output)
 
-    (s/splice input output)))
+    (s/source-only output)))
 
 (defn send-query [conn token query]
   {:pre  [(integer? token) (s/stream? (:client @conn))]
    :post [(s/stream? %)]}
 
-  (let [{:keys [client db]} @conn]
-    (let [bind (fn [stream]
-                 (swap! (:conn conn) (fn [m] (assoc-in m [:sinks token] stream))))
-          unbind (fn []
-                   (timbre/debug "removing sink for token " token)
-                   (swap! (:conn conn) (fn [m]
-                                         (update-in m [:sinks]
-                                                    (fn [sinks]
-                                                      (dissoc sinks token))))))
-
-          stream (token-stream token client db)]
-      (s/on-closed stream unbind)
-      (bind stream)
+  (let [{:keys [client db bus]} @conn]
+    (let [stream (token-stream (s/buffer 10 (b/subscribe bus token)) token client db)]
 
       (d/chain
         (send-data client token query)

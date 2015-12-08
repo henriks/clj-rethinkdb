@@ -1,9 +1,10 @@
 (ns rethinkdb.core
-  (:require [rethinkdb.net :refer [read-init-response send-stop-query setup-routing
+  (:require [rethinkdb.net :refer [read-init-response send-stop-query setup-bus
                                    wrap-duplex-stream handshake]]
             [taoensso.timbre :as timbre]
             [manifold.deferred :as d]
             [manifold.stream :as s]
+            [manifold.bus :as bus]
             [aleph.tcp :as tcp])
   (:import [clojure.lang IDeref]
            [java.io Closeable]
@@ -69,9 +70,9 @@
       (let [wrapped-client (wrap-duplex-stream client)
             connection (connection {:client wrapped-client
                                     :db     db
-                                    :sinks  {}
+                                    :bus    (bus/event-bus)
                                     :token  token})]
-        (setup-routing connection)
+        (setup-bus connection)
         connection))
     (catch Exception e
       (timbre/error e "Error connecting to RethinkDB database")
