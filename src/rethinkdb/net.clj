@@ -100,28 +100,28 @@
                         (timbre/debug "complete-atom" response)
                         (reset! waiting false)
                         (timbre/debug "waiting is" @waiting)
-                        (d/chain
+                        (d/chain'
                           (s/put! output (first response))
                           cleanup))
 
         complete-sequence (fn [response]                    ; submit data, close streams
                             (timbre/debug "complete-sequence" response)
                             (reset! waiting false)
-                            (d/chain
+                            (d/chain'
                               (s/put-all! output response)
                               cleanup))
 
         partial-sequence (fn [response]                     ; submit data, send continue
                            (timbre/debug "partial-sequence" response)
                            (reset! waiting true)
-                           (d/chain
-                             (s/put! output response)
+                           (d/chain'
+                             (when (seq response) (s/put! output response)) ;no sense in forwarding a zero-length partial response
                              (fn [_] (send-data client token continue-query))))
 
         handle-unexpected (fn [type response]
                             (timbre/log :warn "unhandled response: " response ", type: " type)
                             (reset! waiting false)
-                            (cleanup))]
+                            (cleanup :_))]
 
     (add-watch
       waiting
