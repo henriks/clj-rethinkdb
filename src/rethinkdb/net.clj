@@ -115,7 +115,7 @@
                            (timbre/debug "partial-sequence" response)
                            (reset! waiting true)
                            (d/chain'
-                             (when (seq response) (s/put! output response)) ;no sense in forwarding a zero-length partial response
+                             (when (seq response) (s/put-all! output response)) ;no sense in forwarding a zero-length partial response
                              (fn [_] (send-data client token continue-query))))
 
         handle-unexpected (fn [type response]
