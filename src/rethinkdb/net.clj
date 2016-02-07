@@ -1,6 +1,6 @@
 (ns rethinkdb.net
   (:require [cheshire.core :as cheshire]
-            [taoensso.timbre :as timbre]
+            [clojure.tools.logging :as log]
             [manifold.stream :as s]
             [manifold.bus :as b]
             [manifold.deferred :as d]
@@ -11,8 +11,6 @@
             [gloss.core :as gloss]
             [gloss.io :as io])
   (:import [java.io Closeable]))
-
-(defmacro dbg [x] `(let [x# ~x] (println "dbg:" '~x "=" x#) x#))
 
 (gloss/defcodec query-frame (gloss/compile-frame
                               (gloss/finite-frame
@@ -62,25 +60,25 @@
   (let [{client :client bus :bus} @conn]
     (s/consume
       (fn [data]
-        (timbre/trace "publishing" data)
+        (log/trace "publishing" data)
         (let [[recvd-token json-resp] data]
           (if (b/active? bus recvd-token)
             (b/publish! bus recvd-token json-resp)
-            (timbre/warn "UNKNOWN TOKEN" recvd-token json-resp))))
+            (log/warn "UNKNOWN TOKEN" recvd-token json-resp))))
       client)
 
     (s/on-drained client #(doseq [[_ subs] (b/topic->subscribers bus)]
                            (doseq [sub subs] (s/close! sub))))))
 
 (defn send-data [client token query]
-  (timbre/trace "sending" token query)
+  (log/trace "sending" token query)
   (s/put! client [token query]))
 
 (defn token-stream [input token client db]
   {:pre  [(integer? token) (s/stream? client)]
    :post [(s/source? %)]}
 
-  (timbre/debug "token" token)
+  (log/trace "token" token)
 
   (let [db-part {:db [(types/tt->int :DB) [db]]}
         continue-query (concat (parse-query :CONTINUE) db-part)
@@ -91,35 +89,35 @@
         output (s/stream)
 
         cleanup (fn [_]
-                  (timbre/debug "closing input")
+                  (log/trace "closing input")
                   (d/chain
                     (s/close! input)
-                    (fn [_] (timbre/debug "closed?" (s/closed? input) input))))
+                    (fn [_] (log/trace "drained?" (s/drained? input)) input)))
 
         complete-atom (fn [response]                        ; submit data, close streams
-                        (timbre/debug "complete-atom" response)
+                        (log/trace "complete-atom" response)
                         (reset! waiting false)
-                        (timbre/debug "waiting is" @waiting)
+                        (log/trace "waiting is" @waiting)
                         (d/chain'
                           (s/put! output (first response))
                           cleanup))
 
         complete-sequence (fn [response]                    ; submit data, close streams
-                            (timbre/debug "complete-sequence" response)
+                            (log/trace "complete-sequence" response)
                             (reset! waiting false)
                             (d/chain'
                               (s/put-all! output response)
                               cleanup))
 
         partial-sequence (fn [response]                     ; submit data, send continue
-                           (timbre/debug "partial-sequence" response)
+                           (log/trace "partial-sequence" response)
                            (reset! waiting true)
                            (d/chain'
                              (s/put-all! output response)
                              (fn [_] (send-data client token continue-query))))
 
         handle-unexpected (fn [type response]
-                            (timbre/log :warn "unhandled response: " response ", type: " type)
+                            (log/log :warn "unhandled response: " response ", type: " type)
                             (reset! waiting false)
                             (cleanup :_))]
 
@@ -127,18 +125,18 @@
       waiting
       :watcher
       (fn [& args]
-        (timbre/debug "state change" args)))
+        (log/trace "state change" args)))
 
     (s/on-drained
       input
       #(do
-        (timbre/debug "close callback" @waiting)
+        (log/trace "close callback" @waiting)
         (when @waiting (send-data client token stop-query))))
 
     (s/connect-via
       input
       (fn [{type :t resp :r :as json-resp}]
-        (timbre/debug "got" json-resp)
+        (log/trace "got" json-resp)
         (d/chain
           (let [resp (parse-response resp)]
             (condp get type
@@ -167,5 +165,5 @@
       stream)))
 
 (defn send-start-query [conn token query]
-  (timbre/debugf "Sending start query with token %d, query: %s" token query)
+  (log/tracef "Sending start query with token %d, query: %s" token query)
   (send-query conn token (parse-query :START query)))

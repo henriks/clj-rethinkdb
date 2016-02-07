@@ -12,7 +12,7 @@
                  ;[org.clojure/clojurescript "1.7.48" :scope "provided"]
                  [org.clojure/core.async "0.1.346.0-17112a-alpha"]
                  [cheshire "5.5.0"]
-                 [com.taoensso/timbre "4.1.4"]
+                 [org.clojure/tools.logging "0.3.1"]
                  [rethinkdb-protobuf "2.1.0"]
                  [manifold "0.1.1"]
                  [com.google.protobuf/protobuf-java "2.6.1"]
