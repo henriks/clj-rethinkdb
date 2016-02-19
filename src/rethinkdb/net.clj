@@ -117,7 +117,7 @@
                              (fn [_] (send-data client token continue-query))))
 
         handle-unexpected (fn [type response]
-                            (log/log :warn "unhandled response: " response ", type: " type)
+                            (log/log :warn (str "unhandled response: " response ", type: " type))
                             (reset! waiting false)
                             (cleanup :_))]
 
@@ -130,8 +130,13 @@
     (s/on-drained
       input
       #(do
-        (log/trace "close callback" @waiting)
+        (log/trace "drained callback input" @waiting)
         (when @waiting (send-data client token stop-query))))
+
+    (s/on-closed
+      output
+      #(do
+        (log/trace "close callback output")))
 
     (s/connect-via
       input
